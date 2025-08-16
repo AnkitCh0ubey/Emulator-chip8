@@ -1,28 +1,9 @@
-/* 
-    0x73EE (opcode)
-    73: high byte
-        7 high nibble, 3 low nibble
-    EE: low byte
-        E high nibble, E low nibble
-
-    Representation:
-        c: high byte, high nibble
-        x: high byte, low nibble
-        y: low byte, high nibble
-        d: low byte, low nibble
-
-    To extract nibbles, we perform the & operation with F and then right shift the remaining bits.
-
-    for example: opcode = 0x8014 
-        c = (opcode & 0xF000) >> 12 = 8 (means arithmetic/logical operations between registers)
-        x = (opcode & 0x0F00) >> 8 = 0 (register index 0, V0)
-        y = (opcode & 0x00F0) >> 4 = 1 (register index 1, V1)
-        d = (opcode & 0x000F) >> 0 = 4 (add register 1 to 0)
-*/
 struct CPU {
     memory: [u8; 0x1000],
     program_counter: usize,
     registers: [u8; 16],
+    stack: [u16; 16],
+    stack_pointer: usize,
 }
 
 impl CPU {
@@ -44,14 +25,40 @@ impl CPU {
             let y = ((opcode & 0x00F0) >> 4) as u8;
             let d = ((opcode & 0x000F) >> 0) as u8;
         
+            let nnn = opcode & 0x0FFF;
+
             match (c, x, y, d) {
-                (0, 0, 0, 0) => { return; },
-                (0x8, _, _, 0x4) => self.add(x, y),
-                _ => todo!("opcode {:04x}", opcode),
+                (0,     0,   0,    0) => { return; },
+                (0,     0,  0xE, 0xE) => self.rtn(),
+                (0x2,   _,   _,    _) => self.call(nnn),
+                (0x8,   _,   _,  0x4) => self.add(x, y),
+                _                      => todo!("opcode {:04x}", opcode),
             }
         }
     }
+    
+    fn call(&mut self, addr: u16) {
+        let sp = self.stack_pointer;
+        let stack = &mut self.stack;
 
+        if sp > stack.len() {
+            panic!("Stack Overflow")
+        }
+
+        stack[sp] = self.program_counter as u16;
+        self.stack_pointer += 1;
+        self.program_counter = addr as usize;
+    }
+
+    fn rtn(&mut self) {
+        if self.stack_pointer == 0{
+            panic!("underflow")
+        }
+        self.stack_pointer -= 1;
+        let call_addr = self.stack[self.stack_pointer];
+        self.program_counter = call_addr as usize;
+    }
+    
     fn add(&mut self, x: u8, y: u8) {
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
@@ -73,19 +80,36 @@ fn main(){
         registers: [0; 16],
         memory: [0; 4096],
         program_counter: 0,
+        stack: [0; 16],
+        stack_pointer: 0,
     };
 
     cpu.registers[0] = 5;
     cpu.registers[1] = 10;
-    cpu.registers[2] = 26;
-    cpu.registers[3] = 20;
 
     let mem = &mut cpu.memory;
-    mem[0] = 0x80; mem[1] = 0x14;
-    mem[2] = 0x80; mem[3] = 0x24;
-    mem[4] = 0x80; mem[5] = 0x34;
+    mem[0x000] = 0x21; mem[0x001] = 0x00;
+    mem[0x002] = 0x21; mem[0x003] = 0x00;
+    mem[0x004] = 0x00; mem[0x005] = 0x00;
     
+    mem[0x100] = 0x80; mem[0x101] = 0x14;
+    mem[0x102] = 0x80; mem[0x103] = 0x14;
+    mem[0x104] = 0x00; mem[0x105] = 0xEE;
+
     cpu.run();
-    assert_eq!(cpu.registers[0], 61);
-    println!("5 + 10 + 26 + 20 = {}", cpu.registers[0]);
+
+    assert_eq!(cpu.registers[0], 45);
+    println!("5 + (10*2) + (10*2) = {}", cpu.registers[0]);
 }
+
+// loading a function into memory: use slice or mannual mapping
+// fn main() {
+//     let mut memory: [u8; 4096] = [0; 4096];
+//     let mem = &mut memory;
+
+//     mem[0x100] = 0x80; mem[0x101] = 0x14;
+//     mem[0x102] = 0x80; mem[0x103] = 0x14; 
+//     mem[0x104] = 0x00; mem[0x105] = 0xEE; 
+
+//     println!("{:?}", &mem[0x100..0x106]);
+// }
